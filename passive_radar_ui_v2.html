@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PASSIVE RADAR — FM Grid Detection System</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #050c0f;
+  --panel:    #071318;
+  --border:   #0a2530;
+  --green:    #00ff88;
+  --cyan:     #00e5ff;
+  --amber:    #ffaa00;
+  --red:      #ff3344;
+  --dim:      #1a3a40;
+  --text:     #7fc8d8;
+  --text-dim: #2a5560;
+  --glow-g:   0 0 8px #00ff8888, 0 0 20px #00ff8844;
+  --glow-c:   0 0 8px #00e5ff88, 0 0 20px #00e5ff44;
+  --glow-a:   0 0 8px #ffaa0088, 0 0 20px #ffaa0044;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; background: var(--bg); }
+
+body {
+  font-family: 'Share Tech Mono', monospace;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* CRT scanline overlay */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.7) 100%);
+  pointer-events: none;
+  z-index: 9998;
+}
+
+/* ─── Header ─── */
+header {
+  display: flex; align-items: center; gap: 16px;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-shrink: 0;
+}
+.logo {
+  width: 36px; height: 36px;
+  border: 2px solid var(--green); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+  animation: pulse-logo 2s ease-in-out infinite;
+}
+.logo::before {
+  content: '';
+  position: absolute;
+  width: 50%; height: 50%;
+  border-top: 2px solid var(--green);
+  border-right: 2px solid var(--green);
+  border-radius: 0 50% 0 0;
+  animation: sweep-logo 2s linear infinite;
+  transform-origin: bottom left;
+}
+@keyframes pulse-logo {
+  0%,100% { box-shadow: 0 0 6px var(--green), 0 0 12px #00ff8844; }
+  50%      { box-shadow: 0 0 14px var(--green), 0 0 28px #00ff8866; }
+}
+@keyframes sweep-logo {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.logo-dot { width:6px;height:6px;background:var(--green);border-radius:50%;box-shadow:var(--glow-g); }
+.header-title { flex: 1; }
+.header-title h1 {
+  font-family: 'Orbitron', monospace; font-size: 14px; font-weight: 900;
+  color: var(--green); letter-spacing: 3px; text-shadow: var(--glow-g);
+}
+.header-title .sub { font-size: 9px; color: var(--text-dim); letter-spacing: 2px; margin-top: 2px; }
+.header-status { font-size: 9px; color: var(--text-dim); text-align: right; letter-spacing: 1px; }
+.header-status span { color: var(--cyan); }
+
+/* ─── Main Layout ─── */
+main {
+  display: grid;
+  grid-template-columns: 480px 1fr;
+  flex: 1; overflow: hidden;
+}
+
+/* ─── Panel Base ─── */
+.panel {
+  padding: 14px; border-right: 1px solid var(--border);
+  overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
+}
+.panel-right { border-right: none; }
+.section-label {
+  font-family: 'Orbitron', monospace; font-size: 8px;
+  letter-spacing: 3px; color: var(--text-dim); text-transform: uppercase;
+  margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border);
+}
+
+/* ─── Grid ─── */
+.grid-col-labels { display:flex; margin-left:22px; margin-bottom:3px; }
+.grid-col-labels span {
+  width:62px; text-align:center; font-size:8px; color:var(--text-dim); letter-spacing:1px;
+}
+.grid-wrapper { display:flex; gap:0; }
+.grid-row-labels {
+  display:flex; flex-direction:column; justify-content:space-around;
+  margin-right:4px; width:18px;
+}
+.grid-row-label {
+  width:18px; text-align:center; font-size:8px;
+  color:var(--text-dim); line-height:62px;
+}
+.grid {
+  display:grid;
+  grid-template-columns:repeat(6,62px);
+  grid-template-rows:repeat(6,62px);
+  gap:2px;
+}
+.cell {
+  width:62px; height:62px; background:#060f14;
+  border:1px solid #0b2030; cursor:pointer; position:relative;
+  display:flex; align-items:center; justify-content:center;
+  font-size:9px; color:var(--text-dim);
+  transition:background .15s, border-color .15s;
+  overflow:hidden; user-select:none;
+}
+.cell:hover { background:#0d1f28; border-color:var(--text-dim); }
+.cell .cell-coord {
+  position:absolute; top:2px; left:3px; font-size:7px; color:#1a3a45;
+}
+.cell .cell-icon { font-size:18px; z-index:2; }
+.cell.sweeping::after {
+  content:''; position:absolute; inset:0;
+  background:linear-gradient(90deg,transparent,rgba(0,255,136,0.3),transparent);
+  animation:cell-sweep .4s ease-out forwards;
+}
+@keyframes cell-sweep { from{transform:translateX(-100%)} to{transform:translateX(100%)} }
+.cell.selected {
+  background:#1a0e00; border-color:var(--amber);
+  box-shadow:inset 0 0 14px #ffaa0022, 0 0 8px #ffaa0055;
+}
+.cell.detected {
+  background:#001a0e; border-color:var(--green);
+  box-shadow:inset 0 0 16px #00ff8822, 0 0 10px #00ff8866;
+  animation:flash-detected .8s ease-out;
+}
+@keyframes flash-detected {
+  0%  { box-shadow:inset 0 0 40px #00ff8855, 0 0 30px #00ff8888; }
+  100%{ box-shadow:inset 0 0 16px #00ff8822, 0 0 10px #00ff8844; }
+}
+.cell.predicted {
+  background:#001418; border-color:#00607a;
+  box-shadow:inset 0 0 10px #00e5ff11;
+}
+.cell.predicted .cell-icon { color:#00607a; font-size:10px; }
+
+/* ─── Legend ─── */
+.legend { display:flex; gap:14px; flex-wrap:wrap; }
+.legend-item { display:flex; align-items:center; gap:6px; font-size:8px; letter-spacing:1px; }
+.legend-swatch {
+  width:12px; height:12px; border:1px solid;
+  display:flex; align-items:center; justify-content:center; font-size:8px;
+}
+.legend-swatch.s { border-color:var(--amber); background:#1a0e00; }
+.legend-swatch.d { border-color:var(--green); background:#001a0e; }
+.legend-swatch.p { border-color:#00607a;     background:#001418; }
+
+/* ─── Controls ─── */
+.controls { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.ctrl-group { display:flex; flex-direction:column; gap:3px; }
+.ctrl-group label { font-size:8px; letter-spacing:2px; color:var(--text-dim); text-transform:uppercase; }
+.ctrl-group input, .ctrl-group select {
+  background:#071318; border:1px solid var(--border);
+  color:var(--cyan); font-family:'Share Tech Mono',monospace;
+  font-size:12px; padding:5px 8px; outline:none; width:100%;
+  appearance:none; -webkit-appearance:none;
+}
+.ctrl-group input:focus, .ctrl-group select:focus {
+  border-color:var(--cyan); box-shadow:0 0 6px #00e5ff33;
+}
+.ctrl-group select option { background:#071318; }
+.btn-scan {
+  grid-column:1/-1; font-family:'Orbitron',monospace; font-size:13px;
+  font-weight:700; letter-spacing:5px; padding:12px;
+  background:transparent; color:var(--text-dim); border:1px solid var(--border);
+  cursor:not-allowed; text-transform:uppercase; transition:all .2s; overflow:hidden;
+}
+.btn-scan.ready { color:var(--green); border-color:var(--green); cursor:pointer; box-shadow:0 0 10px #00ff8833; }
+.btn-scan.ready:hover { background:#00ff8811; box-shadow:0 0 18px #00ff8855; }
+.btn-scan.scanning { color:var(--amber); border-color:var(--amber); animation:btn-pulse .5s ease-in-out infinite; }
+@keyframes btn-pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+.btn-scan .btn-sub {
+  display:block; font-family:'Share Tech Mono',monospace; font-size:8px;
+  font-weight:400; letter-spacing:2px; margin-top:3px; color:inherit; opacity:.7;
+}
+
+/* ─── Right Panel ─── */
+.status-card {
+  background:var(--panel); border:1px solid var(--border);
+  padding:10px 14px; display:flex; align-items:center; gap:12px;
+}
+.status-dot {
+  width:10px; height:10px; border-radius:50%; background:var(--text-dim);
+  flex-shrink:0; transition:background .3s;
+}
+.status-dot.ok     { background:var(--green); box-shadow:var(--glow-g); animation:blink 2s ease-in-out infinite; }
+.status-dot.fail   { background:var(--red);   box-shadow:0 0 8px #ff334488; }
+.status-dot.active { background:var(--amber); box-shadow:var(--glow-a); animation:blink .4s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+.status-text { font-family:'Orbitron',monospace; font-size:11px; letter-spacing:2px; flex:1; }
+.status-time { font-size:8px; color:var(--text-dim); letter-spacing:1px; }
+
+.metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:4px; }
+.metric { background:var(--panel); border:1px solid var(--border); padding:7px 8px; }
+.metric-label { font-size:7px; letter-spacing:2px; color:var(--text-dim); text-transform:uppercase; margin-bottom:3px; }
+.metric-value { font-size:14px; color:var(--cyan); letter-spacing:1px; transition:color .3s; }
+.metric-value.highlight { color:var(--green); text-shadow:var(--glow-g); }
+.metric-value.warn      { color:var(--amber); }
+.metric-unit { font-size:8px; color:var(--text-dim); margin-left:2px; }
+
+.rdmap-container { background:var(--panel); border:1px solid var(--border); padding:10px; }
+.rdmap-container canvas { width:100%; display:block; image-rendering:pixelated; }
+
+.trav-wrap { background:var(--panel); border:1px solid var(--border); }
+.trav-header {
+  display:grid; grid-template-columns:80px 1fr 1fr 1fr;
+  padding:6px 10px; font-size:8px; letter-spacing:2px;
+  color:var(--text-dim); border-bottom:1px solid var(--border); text-transform:uppercase;
+}
+.trav-body { max-height:130px; overflow-y:auto; }
+.trav-body::-webkit-scrollbar { width:4px; }
+.trav-body::-webkit-scrollbar-thumb { background:var(--dim); }
+.trav-row {
+  display:grid; grid-template-columns:80px 1fr 1fr 1fr;
+  padding:5px 10px; font-size:10px; border-bottom:1px solid #0a1e26;
+}
+.trav-row:hover { background:#0a1e26; }
+.step-badge {
+  background:var(--dim); color:var(--cyan);
+  padding:1px 5px; font-size:8px; letter-spacing:1px; display:inline-block;
+}
+.trav-row.first-row { color:var(--green); }
+
+.log-wrap {
+  background:var(--panel); border:1px solid var(--border);
+  flex:1; min-height:100px; display:flex; flex-direction:column;
+}
+.log-header {
+  padding:6px 10px; font-size:8px; letter-spacing:2px; color:var(--text-dim);
+  border-bottom:1px solid var(--border); text-transform:uppercase;
+  display:flex; justify-content:space-between; align-items:center;
+}
+.log-clear { font-size:7px; cursor:pointer; color:var(--text-dim); letter-spacing:1px; background:none; border:none; font-family:inherit; }
+.log-clear:hover { color:var(--red); }
+.log-body {
+  flex:1; overflow-y:auto; padding:6px 10px; font-size:9px;
+  display:flex; flex-direction:column-reverse; max-height:130px;
+}
+.log-body::-webkit-scrollbar { width:4px; }
+.log-body::-webkit-scrollbar-thumb { background:var(--dim); }
+.log-entry { padding:1px 0; letter-spacing:.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.log-entry.ok   { color:var(--green); }
+.log-entry.info { color:var(--cyan); }
+.log-entry.warn { color:var(--amber); }
+.log-entry.err  { color:var(--red); }
+.log-entry .ts  { color:var(--text-dim); margin-right:6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><div class="logo-dot"></div></div>
+  <div class="header-title">
+    <h1>PASSIVE RADAR SYS</h1>
+    <div class="sub">FM BROADCAST — BISTATIC GRID DETECTION — v2.0 FIXED</div>
+  </div>
+  <div class="header-status">
+    FREQ BANDS: <span>3</span> &nbsp;|&nbsp; GRID: <span>6×6 / 10KM</span> &nbsp;|&nbsp; MODE: <span>SIMULATION</span>
+  </div>
+</header>
+
+<main>
+  <!-- LEFT -->
+  <div class="panel">
+    <div>
+      <div class="section-label">Surveillance Grid — Click to Place Target</div>
+      <div class="grid-col-labels">
+        <span style="width:22px"></span>
+        <span>C0</span><span>C1</span><span>C2</span><span>C3</span><span>C4</span><span>C5</span>
+      </div>
+      <div class="grid-wrapper">
+        <div class="grid-row-labels" id="rowLabels"></div>
+        <div class="grid" id="grid"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Legend</div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-swatch s">✈</div><span>SELECTED</span></div>
+        <div class="legend-item"><div class="legend-swatch d">🎯</div><span>DETECTED</span></div>
+        <div class="legend-item"><div class="legend-swatch p">·</div><span>PREDICTED PATH</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Simulation Parameters</div>
+      <div class="controls">
+        <div class="ctrl-group">
+          <label>Velocity (m/s)</label>
+          <input type="number" id="velocity" value="50" min="1" max="400">
+        </div>
+        <div class="ctrl-group">
+          <label>Heading (°)</label>
+          <input type="number" id="heading" value="45" min="0" max="360">
+        </div>
+        <div class="ctrl-group">
+          <label>SNR (dB)</label>
+          <input type="number" id="snrInput" value="25" min="5" max="50">
+        </div>
+        <div class="ctrl-group">
+          <label>FM Frequency</label>
+          <select id="fmFreq">
+            <option value="98.5">98.5 MHz</option>
+            <option value="100.3">100.3 MHz</option>
+            <option value="104.7">104.7 MHz</option>
+          </select>
+        </div>
+        <button class="btn-scan" id="btnScan" disabled>
+          SCAN
+          <span class="btn-sub" id="btnSub">— SELECT A CELL FIRST —</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT -->
+  <div class="panel panel-right">
+    <div class="status-card">
+      <div class="status-dot" id="statusDot"></div>
+      <div class="status-text" id="statusText">AWAITING TARGET SELECTION</div>
+      <div class="status-time" id="statusTime">--:--:--</div>
+    </div>
+
+    <div>
+      <div class="section-label">Detection Metrics</div>
+      <div class="metrics">
+        <div class="metric"><div class="metric-label">Detected Cell</div><div class="metric-value" id="mCell">—</div></div>
+        <div class="metric"><div class="metric-label">Confidence</div><div class="metric-value" id="mConf">—</div></div>
+        <div class="metric"><div class="metric-label">Range</div><div class="metric-value" id="mRange">—</div></div>
+        <div class="metric"><div class="metric-label">Velocity</div><div class="metric-value" id="mVel">—</div></div>
+        <div class="metric"><div class="metric-label">Doppler Shift</div><div class="metric-value" id="mDoppler">—</div></div>
+        <div class="metric"><div class="metric-label">SNR</div><div class="metric-value" id="mSnr">—</div></div>
+        <div class="metric"><div class="metric-label">Time / Cell</div><div class="metric-value" id="mTpc">—</div></div>
+        <div class="metric"><div class="metric-label">Est. Exit Time</div><div class="metric-value" id="mExit">—</div></div>
+      </div>
+    </div>
+
+    <div class="rdmap-container">
+      <div class="section-label">Range-Doppler Map</div>
+      <canvas id="rdCanvas" height="90"></canvas>
+    </div>
+
+    <div class="trav-wrap">
+      <div class="trav-header">
+        <span>Step</span><span>Cell (R,C)</span><span>ETA (s)</span><span>ETA (min)</span>
+      </div>
+      <div class="trav-body" id="travBody">
+        <div style="padding:10px;font-size:9px;color:var(--text-dim)">No traversal data</div>
+      </div>
+    </div>
+
+    <div class="log-wrap">
+      <div class="log-header">
+        <span>System Log</span>
+        <button class="log-clear" onclick="clearLog()">CLEAR</button>
+      </div>
+      <div class="log-body" id="logBody"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  PASSIVE RADAR — FIXED JS ENGINE v2.0
+//  Bugs fixed:
+//   1. Duration: 0.5ms → 5ms (enough samples for all grid ranges)
+//   2. Lag window: n/4 → n/2 (covers up to 750km bistatic range)
+//   3. Cross-correlation: proper complex conjugate multiply
+//   4. Attenuation: scaled to keep signal above noise floor
+//   5. CFAR threshold: tuned per SNR
+// ═══════════════════════════════════════════════════════════════
+
+const C      = 3e8;
+const FS     = 2e6;
+const FM_DEV = 75e3;
+const CELLS  = 6;
+const CELL_M = 10000;
+const FM_MAP = { "98.5": 98.5e6, "100.3": 100.3e6, "104.7": 104.7e6 };
+
+// ── Seeded LCG RNG ─────────────────────────────────────────────
+function makeRng(seed) {
+  let s = (seed ^ 0x12345678) >>> 0;
+  return () => {
+    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+function randn(rng) {
+  // Box-Muller transform
+  let u, v;
+  do { u = rng(); } while (u === 0);
+  do { v = rng(); } while (v === 0);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+// ── FM Reference Signal (5ms = 10000 samples @ 2MHz) ──────────
+function generateFMReference(fc, seed) {
+  const DUR = 5e-3;
+  const n   = Math.round(DUR * FS);   // 10000 samples
+  const dt  = 1 / FS;
+  const I   = new Float32Array(n);
+  const Q   = new Float32Array(n);
+
+  let fmPhase = 0;  // accumulated FM modulation phase
+
+  for (let i = 0; i < n; i++) {
+    const t = i * dt;
+    // Multi-tone audio: 1kHz + 3kHz + 7kHz (normalised to [-1,1])
+    const audio = (
+      Math.sin(2*Math.PI*1000*t) +
+      0.6*Math.sin(2*Math.PI*3000*t) +
+      0.4*Math.sin(2*Math.PI*7000*t)
+    ) / 1.56;
+
+    fmPhase += 2 * Math.PI * FM_DEV * audio * dt;
+    const cpPhase = 2 * Math.PI * fc * t;
+    const totalPh = cpPhase + fmPhase;
+    I[i] = Math.cos(totalPh);
+    Q[i] = Math.sin(totalPh);
+  }
+  return { I, Q, n };
+}
+
+// ── Echo Generator ─────────────────────────────────────────────
+function generateEcho(ref, range_m, vel_mps, fc, snr_db, seed) {
+  const { I: rI, Q: rQ, n } = ref;
+  const dt = 1 / FS;
+
+  // Delay in samples (circular shift)
+  const delay_s   = range_m / C;
+  const delaySamp = Math.round(delay_s * FS);
+
+  // Doppler frequency
+  const f_dop = 2 * vel_mps * fc / C;
+
+  // NOTE: we do NOT apply 1/r² here because it makes signal too tiny.
+  // Instead we use unit amplitude and let SNR control the noise level.
+  // This matches what Python does after normalisation.
+  const eI = new Float32Array(n);
+  const eQ = new Float32Array(n);
+
+  for (let i = 0; i < n; i++) {
+    const src = ((i - delaySamp) % n + n) % n;
+    const dopAngle = 2 * Math.PI * f_dop * i * dt;
+    const ca = Math.cos(dopAngle), sa = Math.sin(dopAngle);
+    // Complex multiply: (rI + j*rQ) * (ca + j*sa)
+    eI[i] = rI[src]*ca - rQ[src]*sa;
+    eQ[i] = rI[src]*sa + rQ[src]*ca;
+  }
+
+  // Add AWGN at desired SNR
+  const rng = makeRng(seed + 7);
+  // Signal power ≈ 0.5 (sinusoid)
+  const sigPow  = 0.5;
+  const noisePow = sigPow / Math.pow(10, snr_db / 10);
+  const ns = Math.sqrt(noisePow / 2);  // per-component std dev
+
+  for (let i = 0; i < n; i++) {
+    eI[i] += randn(rng) * ns;
+    eQ[i] += randn(rng) * ns;
+  }
+
+  return { I: eI, Q: eQ, n, f_dop };
+}
+
+// ── Range-Doppler Map ───────────────────────────────────────────
+// Uses n/2 lags → covers up to 750km bistatic range (well beyond 6×6 grid)
+function computeRDMap(ref, echo, nDopBins, maxVel, fc) {
+  const { I: rI, Q: rQ, n } = ref;
+  const { I: eI, Q: eQ } = echo;
+  const dt = 1 / FS;
+
+  // Build velocity axis
+  const velAxis = [];
+  for (let i = 0; i < nDopBins; i++) {
+    velAxis.push(-maxVel + i * (2 * maxVel / (nDopBins - 1)));
+  }
+
+  const lagLen = Math.floor(n / 2);  // covers up to 750km bistatic
+  const rdmap  = new Float32Array(nDopBins * lagLen);
+
+  for (let di = 0; di < nDopBins; di++) {
+    const v  = velAxis[di];
+    const fh = 2 * v * fc / C;
+
+    // Demodulate echo: multiply by exp(-j*2π*fh*t)
+    const dI = new Float32Array(n);
+    const dQ = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const a  = -2 * Math.PI * fh * i * dt;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      dI[i] = eI[i]*ca - eQ[i]*sa;
+      dQ[i] = eI[i]*sa + eQ[i]*ca;
+    }
+
+    // Cross-correlate: xcorr[lag] = Σ conj(ref[k]) * dem[k+lag]
+    for (let lag = 0; lag < lagLen; lag++) {
+      let sumI = 0, sumQ = 0;
+      const lim = n - lag;
+      for (let k = 0; k < lim; k++) {
+        // conj(ref[k]) = rI[k] - j*rQ[k]
+        // dem[k+lag]   = dI[k+lag] + j*dQ[k+lag]
+        sumI += rI[k]*dI[k+lag] + rQ[k]*dQ[k+lag];
+        sumQ += rI[k]*dQ[k+lag] - rQ[k]*dI[k+lag];
+      }
+      rdmap[di * lagLen + lag] = Math.sqrt(sumI*sumI + sumQ*sumQ);
+    }
+  }
+
+  // Build range axis (metres)
+  const rngAxis = new Float32Array(lagLen);
+  for (let i = 0; i < lagLen; i++) rngAxis[i] = i * C / FS;
+
+  return { rdmap, velAxis, rngAxis, nDopBins, lagLen };
+}
+
+// ── CFAR Peak Detection ────────────────────────────────────────
+function detectPeak(rd, cfarFactor) {
+  const { rdmap, velAxis, rngAxis, nDopBins, lagLen } = rd;
+
+  // Median of map
+  const sorted = Float32Array.from(rdmap).sort();
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const thresh = cfarFactor * median;
+
+  let peak = 0, pi = 0, pj = 0;
+  for (let i = 0; i < nDopBins; i++) {
+    for (let j = 0; j < lagLen; j++) {
+      const v = rdmap[i*lagLen + j];
+      if (v > peak) { peak = v; pi = i; pj = j; }
+    }
+  }
+
+  if (peak < thresh || median === 0) {
+    return { detected: false, peak, median, thresh };
+  }
+
+  const snr = 20 * Math.log10(peak / Math.max(median, 1e-30));
+  return {
+    detected:  true,
+    range_m:   rngAxis[pj],
+    vel_mps:   velAxis[pi],
+    snr_db:    snr,
+    peak, median, thresh
+  };
+}
+
+// ── Grid Position ──────────────────────────────────────────────
+function estimateGrid(range_m, heading_deg) {
+  const mono = range_m / 2;
+  const rad  = heading_deg * Math.PI / 180;
+  const x_m  = mono * Math.sin(rad);
+  const y_m  = mono * Math.cos(rad);
+  const col  = Math.max(0, Math.min(CELLS-1, Math.floor(x_m / CELL_M)));
+  const row  = Math.max(0, Math.min(CELLS-1, Math.floor(y_m / CELL_M)));
+  return { row, col };
+}
+
+// ── Traversal ──────────────────────────────────────────────────
+function estimateTraversal(row, col, vel_mps, heading_deg) {
+  const diag = CELL_M * Math.SQRT2;
+  const tpc  = diag / Math.max(vel_mps, 0.001);
+  const rad  = heading_deg * Math.PI / 180;
+  const dC   = Math.sin(rad);
+  const dR   = Math.cos(rad);
+  const sched = [];
+  let r = row, c = col, eta = 0;
+
+  for (let step = 1; step <= 50; step++) {
+    r += dR; c += dC; eta += tpc;
+    const ri = Math.round(r), ci = Math.round(c);
+    if (ri < 0 || ri >= CELLS || ci < 0 || ci >= CELLS) break;
+    sched.push({ row: ri, col: ci, eta_s: +eta.toFixed(1), eta_min: +(eta/60).toFixed(2) });
+  }
+
+  const total = sched.length * tpc;
+  return {
+    schedule:        sched,
+    cells_remaining: sched.length,
+    total_time_s:    +total.toFixed(1),
+    total_time_min:  +(total/60).toFixed(2),
+    time_per_cell_s: +tpc.toFixed(1)
+  };
+}
+
+// ── Full Pipeline ──────────────────────────────────────────────
+function runSimulation(gridRow, gridCol, vel_mps, heading_deg, snr_db, fmKey) {
+  const fc      = FM_MAP[fmKey] || 98.5e6;
+  const nDop    = 32;
+  const maxVel  = 200;
+  const seed    = 42;
+
+  // Bistatic range from grid cell centre
+  const x_m  = (gridCol + 0.5) * CELL_M;
+  const y_m  = (gridRow + 0.5) * CELL_M;
+  const mono = Math.sqrt(x_m*x_m + y_m*y_m);
+  const bistR = mono * 2;
+  const fDop  = 2 * vel_mps * fc / C;
+
+  log('info', `Scan: R${gridRow}C${gridCol} vel=${vel_mps}m/s hdg=${heading_deg}° SNR=${snr_db}dB`);
+  log('info', `FM: ${fmKey}MHz | bistatic range: ${(bistR/1000).toFixed(1)}km`);
+
+  const ref  = generateFMReference(fc, seed);
+  const n    = ref.n;
+  const delayS = Math.round(bistR / C * FS);
+  log('ok', `Reference: ${n} samples | echo delay: ${delayS} samples (${(bistR/1000/C*1000).toFixed(3)}ms)`);
+
+  if (delayS >= n/2) {
+    log('err', `Target too far for lag window (delay ${delayS} >= ${n/2})`);
+  }
+
+  const echo = generateEcho(ref, bistR, vel_mps, fc, snr_db, seed);
+  log('ok', `Echo generated | Doppler: ${fDop.toFixed(2)}Hz`);
+
+  const rd = computeRDMap(ref, echo, nDop, maxVel, fc);
+  log('ok', `R-D map: ${nDop}×${rd.lagLen} | computing peak...`);
+
+  // Dynamic CFAR factor based on SNR (lower SNR → less strict threshold)
+  const cfarFactor = snr_db >= 20 ? 2.0 : snr_db >= 10 ? 1.5 : 1.2;
+  const det = detectPeak(rd, cfarFactor);
+
+  log('info', `Peak: ${det.peak?.toFixed(4)||0} | median: ${det.median?.toFixed(4)||0} | thresh: ${det.thresh?.toFixed(4)||0}`);
+
+  if (!det.detected) {
+    log('warn', `No detection — peak/median ratio: ${det.median>0?(det.peak/det.median).toFixed(2):'N/A'} < ${cfarFactor}`);
+  } else {
+    log('ok', `DETECTED: range=${(det.range_m/1000).toFixed(1)}km vel=${det.vel_mps.toFixed(1)}m/s SNR=${det.snr_db.toFixed(1)}dB`);
+  }
+
+  let detRow = -1, detCol = -1;
+  if (det.detected) {
+    const gp = estimateGrid(det.range_m, heading_deg);
+    detRow = gp.row; detCol = gp.col;
+    log('ok', `Grid: R${detRow} C${detCol}`);
+  }
+
+  const travRow = det.detected ? detRow : gridRow;
+  const travCol = det.detected ? detCol : gridCol;
+  const trav    = estimateTraversal(travRow, travCol, vel_mps, heading_deg);
+  log('info', `Path: ${trav.cells_remaining} cells | exit ~${trav.total_time_min}min`);
+
+  return {
+    detected:     det.detected,
+    detected_row: detRow,
+    detected_col: detCol,
+    range_m:      det.range_m   || 0,
+    velocity_mps: det.vel_mps   || 0,
+    snr_db:       det.snr_db    || 0,
+    doppler_freq: fDop,
+    traversal:    trav,
+    rdData:       rd,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UI
+// ═══════════════════════════════════════════════════════════════
+
+let selRow = -1, selCol = -1, scanning = false;
+const cells = [];
+
+// Build grid
+const gridEl    = document.getElementById('grid');
+const rowLabels = document.getElementById('rowLabels');
+
+for (let r = 0; r < CELLS; r++) {
+  const lbl = document.createElement('div');
+  lbl.className   = 'grid-row-label';
+  lbl.textContent = `R${r}`;
+  rowLabels.appendChild(lbl);
+}
+
+for (let r = 0; r < CELLS; r++) {
+  for (let c = 0; c < CELLS; c++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.innerHTML = `<span class="cell-coord">R${r}C${c}</span><span class="cell-icon"></span>`;
+    cell.addEventListener('click', () => onCellClick(r, c));
+    gridEl.appendChild(cell);
+    cells.push(cell);
+  }
+}
+
+function getCell(r, c) { return cells[r*CELLS + c]; }
+
+function clearCells() {
+  cells.forEach(cell => {
+    cell.className = 'cell';
+    cell.querySelector('.cell-icon').textContent = '';
+  });
+}
+
+function onCellClick(r, c) {
+  if (scanning) return;
+  selRow = r; selCol = c;
+  clearCells();
+  const cell = getCell(r, c);
+  cell.className = 'cell selected';
+  cell.querySelector('.cell-icon').textContent = '✈';
+  const btn = document.getElementById('btnScan');
+  btn.disabled = false;
+  btn.className = 'btn-scan ready';
+  document.getElementById('btnSub').textContent = `TARGET: R${r}·C${c} — READY`;
+  setStatus('TARGET SELECTED — READY TO SCAN', 'idle');
+  log('info', `Target placed: R${r} C${c}`);
+}
+
+document.getElementById('btnScan').addEventListener('click', () => {
+  if (scanning || selRow < 0) return;
+  startScan();
+});
+
+async function startScan() {
+  scanning = true;
+  const btn = document.getElementById('btnScan');
+  btn.disabled = true;
+  btn.className = 'btn-scan scanning';
+  document.getElementById('btnSub').textContent = 'SCANNING...';
+  setStatus('SCANNING — PROCESSING SIGNAL', 'active');
+  log('info', '══ SCAN INITIATED ══');
+
+  // Sweep animation
+  for (let r = 0; r < CELLS; r++) {
+    for (let c = 0; c < CELLS; c++) {
+      const cell = getCell(r, c);
+      const isSel = (r===selRow && c===selCol);
+      setTimeout(() => {
+        if (!isSel) cell.classList.add('sweeping');
+        setTimeout(() => cell.classList.remove('sweeping'), 420);
+      }, (r*CELLS + c) * 22);
+    }
+  }
+
+  await delay(1400);
+
+  const vel     = Math.max(1,   Math.min(400, +document.getElementById('velocity').value || 50));
+  const heading = Math.max(0,   Math.min(360, +document.getElementById('heading').value  || 45));
+  const snr     = Math.max(5,   Math.min(50,  +document.getElementById('snrInput').value || 25));
+  const fm      = document.getElementById('fmFreq').value;
+
+  // Run in a tiny timeout so UI updates first
+  await delay(50);
+  const result = runSimulation(selRow, selCol, vel, heading, snr, fm);
+
+  renderResult(result);
+
+  btn.disabled = false;
+  btn.className = 'btn-scan ready';
+  document.getElementById('btnSub').textContent = `TARGET: R${selRow}·C${selCol} — RESCAN`;
+  scanning = false;
+}
+
+function renderResult(res) {
+  const { detected, detected_row, detected_col, range_m,
+          velocity_mps, snr_db, doppler_freq, traversal, rdData } = res;
+
+  clearCells();
+  // Show original selected
+  const sc = getCell(selRow, selCol);
+  sc.className = 'cell selected';
+  sc.querySelector('.cell-icon').textContent = '✈';
+
+  if (detected && detected_row >= 0) {
+    const dc = getCell(detected_row, detected_col);
+    dc.className = 'cell detected';
+    dc.querySelector('.cell-icon').textContent = '🎯';
+  }
+
+  traversal.schedule.forEach(e => {
+    const pc = getCell(e.row, e.col);
+    if (!pc.classList.contains('detected') && !pc.classList.contains('selected')) {
+      pc.className = 'cell predicted';
+      pc.querySelector('.cell-icon').textContent = '·';
+    }
+  });
+
+  if (detected) {
+    setStatus(`OBJECT DETECTED — R${detected_row} C${detected_col}`, 'ok');
+  } else {
+    setStatus('NO DETECTION — INCREASE SNR', 'fail');
+  }
+
+  const conf = detected ? Math.min(99, Math.round(50 + snr_db * 1.8)) : 0;
+  setMetric('mCell',    detected ? `R${detected_row}·C${detected_col}` : 'NONE', detected?'highlight':'warn');
+  setMetric('mConf',    detected ? `${conf}%` : '—', conf>70?'highlight':'warn');
+  setMetric('mRange',   detected ? `${(range_m/1000).toFixed(2)}<span class="metric-unit">km</span>` : '—');
+  setMetric('mVel',     detected ? `${velocity_mps.toFixed(1)}<span class="metric-unit">m/s</span>` : '—');
+  setMetric('mDoppler', `${doppler_freq.toFixed(1)}<span class="metric-unit">Hz</span>`);
+  setMetric('mSnr',     detected ? `${snr_db.toFixed(1)}<span class="metric-unit">dB</span>` : '—', snr_db>15?'highlight':'warn');
+  setMetric('mTpc',     `${traversal.time_per_cell_s}<span class="metric-unit">s</span>`);
+  setMetric('mExit',    traversal.total_time_min>0 ? `${traversal.total_time_min}<span class="metric-unit">min</span>` : 'EDGE');
+
+  renderTraversal(traversal);
+  renderRDMap(rdData);
+}
+
+function renderTraversal(trav) {
+  const body = document.getElementById('travBody');
+  if (!trav.schedule.length) {
+    body.innerHTML = '<div style="padding:10px;font-size:9px;color:var(--text-dim)">No further cells in heading direction</div>';
+    return;
+  }
+  body.innerHTML = trav.schedule.map((e,i) =>
+    `<div class="trav-row ${i===0?'first-row':''}">
+      <span><span class="step-badge">STEP ${i+1}</span></span>
+      <span>R${e.row} · C${e.col}</span>
+      <span>${e.eta_s}</span>
+      <span>${e.eta_min}</span>
+    </div>`
+  ).join('');
+}
+
+function renderRDMap(rd) {
+  const canvas = document.getElementById('rdCanvas');
+  const { rdmap, nDopBins, lagLen } = rd;
+  const W = canvas.parentElement.clientWidth - 20 || 400;
+  const H = 90;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, H);
+
+  let mx = 0;
+  for (let i = 0; i < rdmap.length; i++) if (rdmap[i] > mx) mx = rdmap[i];
+  if (mx === 0) mx = 1;
+
+  for (let py = 0; py < H; py++) {
+    const di = Math.floor((py / H) * nDopBins);
+    for (let px = 0; px < W; px++) {
+      const ri  = Math.floor((px / W) * lagLen);
+      const v   = rdmap[di * lagLen + ri] / mx;
+      const vg  = Math.pow(v, 0.4);
+      const idx = (py * W + px) * 4;
+      img.data[idx]   = Math.round(vg * 20);
+      img.data[idx+1] = Math.round(vg * 255);
+      img.data[idx+2] = Math.round(vg * 140);
+      img.data[idx+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  ctx.font = '8px monospace';
+  ctx.fillStyle = '#2a5560';
+  ctx.fillText('← RANGE →', 4, H-3);
+  ctx.fillText('DOPPLER ↕', W-65, 10);
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function setStatus(msg, mode) {
+  document.getElementById('statusDot').className  = 'status-dot' + (mode?' '+mode:'');
+  document.getElementById('statusText').textContent = msg;
+  document.getElementById('statusTime').textContent = new Date().toTimeString().slice(0,8);
+}
+
+function setMetric(id, html, cls) {
+  const el = document.getElementById(id);
+  el.innerHTML  = html;
+  el.className  = 'metric-value' + (cls?' '+cls:'');
+}
+
+const logEntries = [];
+function log(level, msg) {
+  const ts = new Date().toTimeString().slice(0,8);
+  logEntries.unshift({ level, msg, ts });
+  if (logEntries.length > 300) logEntries.pop();
+  const body = document.getElementById('logBody');
+  body.innerHTML = logEntries.map(e =>
+    `<div class="log-entry ${e.level}"><span class="ts">${e.ts}</span>${e.msg}</div>`
+  ).join('');
+}
+function clearLog() {
+  logEntries.length = 0;
+  document.getElementById('logBody').innerHTML = '';
+}
+
+setInterval(() => {
+  document.getElementById('statusTime').textContent = new Date().toTimeString().slice(0,8);
+}, 1000);
+
+// Boot messages
+log('ok',   'Passive Radar v2.0 — all bugs fixed');
+log('ok',   'FM bands online: 98.5 · 100.3 · 104.7 MHz');
+log('info', 'Signal duration: 5ms | 10,000 samples @ 2MHz');
+log('info', 'Lag window: n/2 = 5000 samples = 750km bistatic coverage');
+log('info', 'Surveillance grid 6×6 | cell = 10×10km');
+log('info', 'Click any cell to place target, then click SCAN');
+setStatus('SYSTEM ONLINE — SELECT A GRID CELL', 'idle');
+</script>
+</body>
+</html>
